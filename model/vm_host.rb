@@ -31,10 +31,6 @@ class VmHost < Sequel::Model
     net6.netmask.prefix_len
   end
 
-  def vm_addresses
-    vms.filter_map(&:assigned_vm_address)
-  end
-
   def provider_name
     provider&.provider_name
   end
@@ -126,30 +122,20 @@ class VmHost < Sequel::Model
   end
 
   def ip4_random_vm_network
-    # we get the available subnets and if the subnet is /32, we eliminate it
-    available_subnets = assigned_subnets.select { |a| a.cidr.version == 4 && a.cidr.network.to_s != sshable.host }
-    # we eliminate the subnets that are full
-    used_subnet = available_subnets.select { |as| as.assigned_vm_addresses.count != 2**(32 - as.cidr.netmask.prefix_len) }.sample
+    assigned_subnets_dataset.eager(:assigned_vm_addresses).all
+      .select { |subnet| subnet.cidr.version == 4 && subnet.cidr.network.to_s != sshable.host }
+      .flat_map do |subnet|
+        all_addresses = (0...subnet.cidr.len).map { subnet.cidr.nth(it) }
+        # For Leaseweb, avoid using the very first and the last ips
+        if provider == "leaseweb"
+          all_addresses.reject! { |a| a.to_s == subnet.cidr.network.to_s || a.to_s == subnet.cidr.nth(subnet.cidr.len - 1).to_s }
+        end
 
-    # not available subnet
-    return [nil, nil] unless used_subnet
-
-    # we pick a random /31 subnet from the available subnet
-    rand = SecureRandom.random_number(2**(32 - used_subnet.cidr.netmask.prefix_len)).to_i
-    picked_subnet = used_subnet.cidr.nth(rand)
-    # we check if the picked subnet is used by one of the vms
-    return ip4_random_vm_network if vm_addresses.map { it.ip.to_s }.include?("#{picked_subnet}/32")
-
-    # For Leaseweb, avoid using the very first and the last ips
-    if provider == "leaseweb"
-      subnet_size = 2**(32 - used_subnet.cidr.netmask.prefix_len)
-      last_ip = used_subnet.cidr.nth(subnet_size - 1).to_s
-      first_ip = used_subnet.cidr.network.to_s
-      if picked_subnet.to_s == first_ip.to_s || picked_subnet.to_s == last_ip.to_s
-        return ip4_random_vm_network
+        used_addresses = subnet.assigned_vm_addresses.map { it.ip.network }
+        unused_addresses = all_addresses.reject { |a| used_addresses.any? { |u| a.cmp(u) == 0 } }
+        unused_addresses.map { [it, subnet] }
       end
-    end
-    [picked_subnet, used_subnet]
+      .sample(random: SecureRandom)
   end
 
   def veth_pair_random_ip4_addr
