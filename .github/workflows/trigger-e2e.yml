@@ -1,0 +1,38 @@
+name: Trigger E2E tests
+
+permissions:
+  contents: read
+  actions: write
+  pull-requests: write
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+    pr_comment:
+      if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/run-e2e')
+      runs-on: ubicloud
+      steps:
+        - name: Trigger E2E tests
+          uses: actions/github-script@v7
+          with:
+            script: |
+              // Add a reaction to confirm that it's checking
+              github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'rocket'
+              })
+
+              // Create a workflow dispatch event
+              const testCases = context.payload.comment.body.split(' ')[1]
+              const inputs = testCases ? { test_cases: testCases } : {}
+              github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'e2e.yml',
+                ref: context.ref,
+                inputs: inputs
+              });
