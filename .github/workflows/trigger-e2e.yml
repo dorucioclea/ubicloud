@@ -8,16 +8,28 @@ permissions:
 on:
   issue_comment:
     types: [created]
+  push:
+    branches:
+      - enes/e2e-run-command-test
 
 jobs:
     pr_comment:
-      if: github.event.issue.pull_request && startsWith(github.event.comment.body, '/run-e2e')
       runs-on: ubicloud
       steps:
         - name: Trigger E2E tests
           uses: actions/github-script@v7
           with:
             script: |
+              const contributors = await github.rest.repos.listContributors({
+                owner: context.repo.owner,
+                repo: context.repo.repo
+              });
+              const contributorsLogins = contributors.data.map(c => c.id);
+              console.log(contributorsLogins);
+
+              process.exit(1);
+
+
               // Add a reaction to confirm that it's checking
               github.rest.reactions.createForIssueComment({
                 owner: context.repo.owner,
