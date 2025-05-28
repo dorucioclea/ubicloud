@@ -1,16 +1,61 @@
 # frozen_string_literal: true
 
 class Clover
+  def validate_postgres_input
+
+    name = typecast_params.nonempty_str!("name")
+    Validation.validate_postgres_name(name)
+
+    flavor = typecast_params.nonempty_str("flavor", PostgresResource::Flavor::STANDARD)
+    Validation.validate_postgres_flavor(flavor)
+    subtree = option_tree["flavor"][flavor]
+
+    available_locations = subtree["location"].keys.map(&:display_name)
+    unless (subtree = subtree["location"].find { |k, v| k.id == @location.id }[1])
+      fail ValidationFailed.new({location: "\"#{@location.display_name}\" is not a valid PostgreSQL location. Available locations: #{available_locations.join(", ")}"})
+    end
+
+    available_sizes = subtree["family"].values.flat_map { it["size"].keys }
+    size = typecast_params.nonempty_str!("size")
+    family = size.split("-").first
+    unless (subtree = subtree["family"][family])
+      fail ValidationFailed.new({size: "\"#{size}\" is not a valid PostgreSQL database size. Available sizes: #{available_sizes.join(", ")}"})
+    end
+
+    unless (subtree = subtree["size"][size])
+      fail ValidationFailed.new({size: "\"#{size}\" is not a valid PostgreSQL database size. Available sizes: #{available_sizes.join(", ")}"})
+    end
+
+    available_storage_sizes = subtree["storage_size"].keys
+    storage_size = typecast_params.nonempty_str("storage_size", subtree["storage_size"].keys.first)
+    unless (subtree = subtree["storage_size"][storage_size])
+      fail ValidationFailed.new({storage_size: "\"#{storage_size}\" is not a valid PostgreSQL storage size. Available storage sizes: #{available_storage_sizes.join(", ")}"})
+    end
+
+    available_ha_types = subtree["ha_type"].keys
+    ha_type = typecast_params.nonempty_str("ha_type", PostgresResource::HaType::NONE)
+    unless (subtree = subtree["ha_type"][ha_type])
+      fail ValidationFailed.new({ha_type: "\"#{ha_type}\" is not a valid PostgreSQL HA type. Available HA types #{available_ha_types.join(", ")}"})
+    end
+
+    available_versions = option_tree["version"].keys
+    version = typecast_params.nonempty_str("version", PostgresResource::DEFAULT_VERSION)
+    unless available_versions.include?(version)
+      fail ValidationFailed.new({version: "\"#{version}\" is not a valid PostgreSQL version. Available versions: #{available_versions.join(", ")}"})
+    end
+
+  end
+
   def postgres_post(name)
     authorize("Postgres:create", @project.id)
     fail Validation::ValidationFailed.new({billing_info: "Project doesn't have valid billing information"}) unless @project.has_valid_payment_method?
 
     Validation.validate_postgres_location(@location, @project.id)
 
-    size = typecast_params.nonempty_str!("size")
+    validate_postgres_input(flavor:, location: @location, size:, storage_size_gib:, version:, ha_type:)
+
     parsed_size = Validation.validate_postgres_size(@location, size, @project.id)
 
-    ha_type = typecast_params.nonempty_str("ha_type") || PostgresResource::HaType::NONE
     requested_standby_count = case ha_type
     when PostgresResource::HaType::ASYNC then 1
     when PostgresResource::HaType::SYNC then 2
@@ -83,8 +128,7 @@ class Clover
 
     options.add_option(name: "flavor", values: flavor)
 
-    locations = location || (Option::POSTGRES_LOCATION_OPTIONS + Location.where({project_id: @project.id}).all)
-    options.add_option(name: "location", values: locations, parent: "flavor", check: ->(flavor, location) {
+    options.add_option(name: "location", values: location || @project.postgres_locations, parent: "flavor", check: ->(flavor, location) {
       !(location.provider == "aws" && flavor != PostgresResource::Flavor::STANDARD)
     })
 

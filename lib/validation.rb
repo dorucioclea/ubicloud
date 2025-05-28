@@ -57,8 +57,7 @@ module Validation
   end
 
   def self.validate_postgres_location(location, project_id)
-    locations = Option::POSTGRES_LOCATION_OPTIONS + Location.where({project_id: @project.id}).all
-    unless locations.include?(location)
+    unless Project[project_id].postgres_locations.include?(location)
       msg = "Given location is not a valid postgres location. Available locations: #{locations.map(&:display_name)}"
       fail ValidationFailed.new({location: msg})
     end
