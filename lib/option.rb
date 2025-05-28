@@ -10,14 +10,6 @@ module Option
     Location.where(project_id: nil).all.select { |pl| !only_visible || (pl.visible || feature_flags.include?("location_#{pl.name.tr("-", "_")}")) }
   end
 
-  def self.postgres_locations(project_id: nil)
-    Location
-      .where(Sequel.|(
-        {name: ["hetzner-fsn1", "leaseweb-wdc02"]},
-        {project_id:}
-      )).all
-  end
-
   def self.kubernetes_locations
     Location.where(name: ["hetzner-fsn1", "leaseweb-wdc02"]).all
   end
@@ -78,42 +70,43 @@ module Option
     VmSize.new("burstable-#{it}", "burstable", it, it * 50, it * 50, (it * 1.6).to_i, storage_size_options, io_limits, false, "arm64")
   }).freeze
 
-  PostgresSize = Struct.new(:location_id, :name, :vm_family, :vm_size, :flavor, :vcpu, :memory, :storage_size_options) do
-    alias_method :display_name, :name
-  end
-  PostgresSizes = Option.postgres_locations.product([2, 4, 8, 16, 30, 60]).flat_map {
-    storage_size_options = [_2 * 32, _2 * 64, _2 * 128]
-    storage_size_options.map! { |size| size / 15 * 16 } if [30, 60].include?(_2)
+  # Postgres Global Options
+  POSTGRES_FLAVOR_OPTIONS = [
+    PostgresResource::Flavor::STANDARD,
+    PostgresResource::Flavor::PARADEDB,
+    PostgresResource::Flavor::LANTERN
+  ].freeze
 
-    storage_size_limiter = [4096, storage_size_options.last].min.fdiv(storage_size_options.last)
-    storage_size_options.map! { |size| size * storage_size_limiter }
-    [
-      PostgresSize.new(_1.id, "standard-#{_2}", "standard", "standard-#{_2}", PostgresResource::Flavor::STANDARD, _2, _2 * 4, storage_size_options),
-      PostgresSize.new(_1.id, "standard-#{_2}", "standard", "standard-#{_2}", PostgresResource::Flavor::PARADEDB, _2, _2 * 4, storage_size_options),
-      PostgresSize.new(_1.id, "standard-#{_2}", "standard", "standard-#{_2}", PostgresResource::Flavor::LANTERN, _2, _2 * 4, storage_size_options)
-    ]
-  }.concat(Option.postgres_locations.product([1, 2]).flat_map {
-    storage_size_options = [_2 * 16, _2 * 32, _2 * 64]
-    storage_size_options.pop if _1.name == "leaseweb-wdc02"
-    [
-      PostgresSize.new(_1.id, "burstable-#{_2}", "burstable", "burstable-#{_2}", PostgresResource::Flavor::STANDARD, _2, _2 * 2, storage_size_options),
-      PostgresSize.new(_1.id, "burstable-#{_2}", "burstable", "burstable-#{_2}", PostgresResource::Flavor::PARADEDB, _2, _2 * 2, storage_size_options),
-      PostgresSize.new(_1.id, "burstable-#{_2}", "burstable", "burstable-#{_2}", PostgresResource::Flavor::LANTERN, _2, _2 * 2, storage_size_options)
-    ]
-  }).freeze
+  POSTGRES_LOCATION_OPTIONS = Location.where(name: ["hetzner-fsn1", "leaseweb-wdc02"]).all.freeze
 
-  PostgresHaOption = Struct.new(:name, :standby_count, :title, :explanation)
-  PostgresHaOptions = [[PostgresResource::HaType::NONE, 0, "No Standbys", "No replication"],
-    [PostgresResource::HaType::ASYNC, 1, "1 Standby", "Asynchronous replication"],
-    [PostgresResource::HaType::SYNC, 2, "2 Standbys", "Synchronous replication with quorum"]].map {
-    PostgresHaOption.new(*it)
-  }.freeze
+  PostgresFamilyOption = Data.define(:name, :ui_description)
+  POSTGRES_FAMILY_OPTIONS = [
+    PostgresFamilyOption.new("standard", "Dedicated CPU"),
+    PostgresFamilyOption.new("burstable", "Shared CPU")
+  ].freeze
 
-  POSTGRES_VERSION_OPTIONS = {
-    PostgresResource::Flavor::STANDARD => ["17", "16"],
-    PostgresResource::Flavor::PARADEDB => ["17", "16"],
-    PostgresResource::Flavor::LANTERN => ["16"]
-  }
+  PostgresSizeOption = Data.define(:name, :family, :vcpu_count, :memory_gib)
+  POSTGRES_SIZE_OPTIONS = [
+    PostgresSizeOption.new("standard-2", "standard", 2, 8),
+    PostgresSizeOption.new("standard-4", "standard", 4, 16),
+    PostgresSizeOption.new("standard-8", "standard", 8, 32),
+    PostgresSizeOption.new("standard-16", "standard", 16, 64),
+    PostgresSizeOption.new("standard-30", "standard", 30, 120),
+    PostgresSizeOption.new("standard-60", "standard", 60, 240),
+    PostgresSizeOption.new("burstable-1", "burstable", 1, 2),
+    PostgresSizeOption.new("burstable-2", "burstable", 2, 4)
+  ].freeze
+
+  POSTGRES_STORAGE_SIZE_OPTIONS = ["16", "32", "64", "128", "256", "512", "1024", "2048", "4096"].freeze
+
+  POSTGRES_VERSION_OPTIONS = ["16", "17"].freeze
+
+  PostgresHaOption = Data.define(:name, :standby_count, :description)
+  POSTGRES_HA_OPTIONS = [
+    PostgresHaOption.new(PostgresResource::HaType::NONE, 0, "No Standbys"),
+    PostgresHaOption.new(PostgresResource::HaType::ASYNC, 1, "1 Standby"),
+    PostgresHaOption.new(PostgresResource::HaType::SYNC, 2, "2 Standbys")
+  ].freeze
 
   AWS_LOCATIONS = ["us-east-1"].freeze
 
@@ -122,18 +115,4 @@ module Option
     [3, "3 Nodes", "Three control plane nodes with resilience"]].map {
     KubernetesCPOption.new(*it)
   }.freeze
-
-  def self.customer_postgres_sizes_for_project(project_id)
-    return Option::PostgresSizes unless project_id
-
-    customer_locations = Location.where(project_id:).all
-    (
-      Option::PostgresSizes +
-      customer_locations.product([2, 4, 8, 16, 30, 60]).flat_map { |location, size|
-        storage_size_options = [(size * 59.375).to_i]
-
-        Option::PostgresSize.new(location.id, "standard-#{size}", "standard", "standard-#{size}", PostgresResource::Flavor::STANDARD, size, size * 4, storage_size_options)
-      }
-    )
-  end
 end

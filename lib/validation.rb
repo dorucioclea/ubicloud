@@ -57,9 +57,9 @@ module Validation
   end
 
   def self.validate_postgres_location(location, project_id)
-    available_pg_locs = Option.postgres_locations(project_id:)
-    unless available_pg_locs.include?(location)
-      msg = "Given location is not a valid postgres location. Available locations: #{available_pg_locs.map(&:display_name)}"
+    locations = Option::POSTGRES_LOCATION_OPTIONS + Location.where({project_id: @project.id}).all
+    unless locations.include?(location)
+      msg = "Given location is not a valid postgres location. Available locations: #{locations.map(&:display_name)}"
       fail ValidationFailed.new({location: msg})
     end
   end
@@ -105,14 +105,13 @@ module Validation
   end
 
   def self.validate_postgres_ha_type(ha_type)
-    unless Option::PostgresHaOptions.find { it.name == ha_type }
-      fail ValidationFailed.new({ha_type: "\"#{ha_type}\" is not a valid PostgreSQL high availability option. Available options: #{Option::PostgresHaOptions.map(&:name)}"})
+    unless Option::POSTGRES_HA_OPTIONS.find { it.name == ha_type }
+      fail ValidationFailed.new({ha_type: "\"#{ha_type}\" is not a valid PostgreSQL high availability option. Available options: #{Option::POSTGRES_HA_OPTIONS.map(&:name)}"})
     end
   end
 
   def self.validate_postgres_flavor(flavor)
-    flavors = [PostgresResource::Flavor::STANDARD, PostgresResource::Flavor::PARADEDB, PostgresResource::Flavor::LANTERN]
-    unless flavors.include?(flavor)
+    unless Option::POSTGRES_FLAVOR_OPTIONS.include?(flavor)
       fail ValidationFailed.new({flavor: "\"#{flavor}\" is not a valid PostgreSQL flavor option. Available options: #{flavors}"})
     end
   end
