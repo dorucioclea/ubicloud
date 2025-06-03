@@ -114,6 +114,43 @@ module Option
     PostgresResource::Flavor::PARADEDB => ["17", "16"],
     PostgresResource::Flavor::LANTERN => ["16"]
   }
+  # Postgres Global Options
+  POSTGRES_FLAVOR_OPTIONS = [
+    PostgresResource::Flavor::STANDARD,
+    PostgresResource::Flavor::PARADEDB,
+    PostgresResource::Flavor::LANTERN
+  ].freeze
+
+  POSTGRES_LOCATION_OPTIONS = Location.where(name: ["hetzner-fsn1", "leaseweb-wdc02"]).all.freeze
+
+  PostgresFamilyOption = Data.define(:name, :ui_description)
+  POSTGRES_FAMILY_OPTIONS = [
+    PostgresFamilyOption.new("standard", "Dedicated CPU"),
+    PostgresFamilyOption.new("burstable", "Shared CPU")
+  ].freeze
+
+  PostgresSizeOption = Data.define(:name, :family, :vcpu_count, :memory_gib)
+  POSTGRES_SIZE_OPTIONS = [
+    PostgresSizeOption.new("standard-2", "standard", 2, 8),
+    PostgresSizeOption.new("standard-4", "standard", 4, 16),
+    PostgresSizeOption.new("standard-8", "standard", 8, 32),
+    PostgresSizeOption.new("standard-16", "standard", 16, 64),
+    PostgresSizeOption.new("standard-30", "standard", 30, 120),
+    PostgresSizeOption.new("standard-60", "standard", 60, 240),
+    PostgresSizeOption.new("burstable-1", "burstable", 1, 2),
+    PostgresSizeOption.new("burstable-2", "burstable", 2, 4)
+  ].freeze
+
+  POSTGRES_STORAGE_SIZE_OPTIONS = ["16", "32", "64", "128", "256", "512", "1024", "2048", "4096"].freeze
+
+  POSTGRES_VERSION_OPTIONS = ["16", "17"].freeze
+
+  PostgresHaOption = Data.define(:name, :standby_count, :description)
+  POSTGRES_HA_OPTIONS = [
+    PostgresHaOption.new(PostgresResource::HaType::NONE, 0, "No Standbys"),
+    PostgresHaOption.new(PostgresResource::HaType::ASYNC, 1, "1 Standby"),
+    PostgresHaOption.new(PostgresResource::HaType::SYNC, 2, "2 Standbys")
+  ].freeze
 
   AWS_LOCATIONS = ["us-east-1"].freeze
 
