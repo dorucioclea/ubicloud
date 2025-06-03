@@ -144,6 +144,10 @@ class Project < Sequel::Model
     ps || Prog::Vnet::SubnetNexus.assemble(id, name: name, location_id: location.id).subject
   end
 
+  def postgres_locations
+    Option::POSTGRES_LOCATION_OPTIONS + locations
+  end
+
   def self.feature_flag(*flags, into: self)
     flags.map!(&:to_s).each do |flag|
       into.module_eval do

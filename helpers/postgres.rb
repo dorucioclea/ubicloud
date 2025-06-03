@@ -81,39 +81,46 @@ class Clover
 
   def generate_postgres_options(flavor: "standard", location: nil)
     options = OptionTreeGenerator.new
-    all_sizes_for_project = Option.customer_postgres_sizes_for_project(@project.id)
 
     options.add_option(name: "name")
+
     options.add_option(name: "flavor", values: flavor)
-    options.add_option(name: "location", values: location || Option.postgres_locations(project_id: @project.id), parent: "flavor", check: ->(flavor, location) {
+
+    options.add_option(name: "location", values: location || @project.postgres_locations, parent: "flavor", check: ->(flavor, location) {
       !(location.provider == "aws" && flavor != PostgresResource::Flavor::STANDARD)
     })
-    options.add_option(name: "family", values: all_sizes_for_project.map(&:vm_family).uniq, parent: "location", check: ->(flavor, location, family) {
-      if location.provider == "aws" && family != "standard"
-        false
+
+    options.add_option(name: "family", values: Option::POSTGRES_FAMILY_OPTIONS.map(&:name), parent: "location", check: ->(flavor, location, family) {
+      location.provider != "aws" || family == "standard"
+    })
+
+    options.add_option(name: "size", values: Option::POSTGRES_SIZE_OPTIONS.map(&:name), parent: "family", check: ->(flavor, location, family, size) {
+      family_from_size, vcpu_count = size.split("-")
+
+      return false if family_from_size != family
+      return false if location.provider == "aws" && vcpu_count.to_i > 16
+      true
+    })
+
+    aws_storage_size_options = ["118", "237", "475", "950"]
+    storage_size_options = Option::POSTGRES_STORAGE_SIZE_OPTIONS + aws_storage_size_options
+    options.add_option(name: "storage_size", values: storage_size_options, parent: "size", check: ->(flavor, location, family, size, storage_size) {
+      vcpu_count = size.split("-").last.to_i
+
+      if location.provider == "aws"
+        storage_index = Math.log2(vcpu_count).ceil - 1
+        aws_storage_size_options[storage_index] == storage_size
       else
-        available_families = Option.families.map(&:name)
-        available_families.include?(family) && BillingRate.from_resource_properties("PostgresVCpu", "#{flavor}-#{family}", location.name)
+        min_storage = (vcpu_count >= 30) ? 1024 : vcpu_count * 32
+        min_storage /= 2 if family == "burstable"
+        [min_storage, min_storage * 2, min_storage * 4].include?(storage_size.to_i)
       end
     })
-    options.add_option(name: "size", values: all_sizes_for_project.map(&:name).uniq, parent: "family", check: ->(flavor, location, family, size) {
-      if location.provider == "aws" && (size.split("-").last.to_i > 16 || size.split("-").first == "burstable")
-        false
-      else
-        pg_size = all_sizes_for_project.find { it.name == size && it.flavor == flavor && it.location_id == location.id }
-        vm_size = Option::VmSizes.find { it.name == pg_size.vm_size && it.arch == "x64" && it.visible }
-        vm_size.family == family
-      end
-    })
 
-    options.add_option(name: "storage_size", values: ["16", "32", "64", "128", "256", "512", "1024", "2048", "4096", "118", "237", "475", "950", "1781", "1900", "3562", "3800"], parent: "size", check: ->(flavor, location, family, size, storage_size) {
-      pg_size = all_sizes_for_project.find { it.name == size && it.flavor == flavor && it.location_id == location.id }
-      pg_size.storage_size_options.include?(storage_size.to_i)
-    })
+    options.add_option(name: "version", values: Option::POSTGRES_VERSION_OPTIONS)
 
-    options.add_option(name: "version", values: Option::POSTGRES_VERSION_OPTIONS[flavor], parent: "flavor")
+    options.add_option(name: "ha_type", values: Option::POSTGRES_HA_OPTIONS.map(&:name), parent: "storage_size")
 
-    options.add_option(name: "ha_type", values: [PostgresResource::HaType::NONE, PostgresResource::HaType::ASYNC, PostgresResource::HaType::SYNC], parent: "storage_size")
     options.serialize
   end
 end
