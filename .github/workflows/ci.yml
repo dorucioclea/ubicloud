@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - main
+      - enes/github-test
   pull_request:
 
 jobs:
@@ -15,10 +15,58 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runs-on: [ubicloud, ubicloud-arm]
+        runs-on:
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubicloud
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubuntu-22.04
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubicloud-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
+          - ubuntu-22.04-arm
     name: Ruby CI - ${{matrix.runs-on}}
     runs-on: ${{matrix.runs-on}}
-    timeout-minutes: 15
+    timeout-minutes: 60
 
     env:
       DB_USER: clover
@@ -37,6 +85,13 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
 
     steps:
+    - if: ${{ matrix.runs-on == 'ubuntu-22.04-arm' }}
+      run: |
+        sudo sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+        wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+        sudo apt-get update
+        sudo apt-get install -y postgresql-client-15 libpq-dev
+
     - name: Perform superuser-only actions, then remove superuser
       run: |
         psql "postgres://${{ env.DB_USER }}:${{ env.DB_PASSWORD }}@localhost:5432/${{ env.DB_NAME }}" \
