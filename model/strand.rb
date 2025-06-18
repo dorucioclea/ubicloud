@@ -214,11 +214,27 @@ SQL
       e
     rescue Prog::Base::Hop => hp
       last_changed_at = Time.parse(top_frame["last_label_changed_at"])
-      Clog.emit("hopped") { {strand_hopped: {duration: Time.now - last_changed_at, from: prog_label, to: "#{hp.new_prog}.#{hp.new_label}"}} }
+      Clog.emit("hopped") {
+        {
+          strand_hopped: {
+            duration: Time.now - last_changed_at,
+            from: prog_label,
+            to: "#{hp.new_prog}.#{hp.new_label}",
+            strand_ubid: ubid
+          }
+        }
+      }
       top_frame["last_label_changed_at"] = Time.now.to_s
       modified!(:stack)
 
       update(**hp.strand_update_args, try: 0)
+
+      Clog.emit("strands_after_hop") {
+        {
+          strands:
+            Strand.all.map { |x| [x.ubid, x.prog, x.label, x.subject&.ubid, x.stack] }
+        }
+      }
 
       hp
     rescue Prog::Base::Exit => ext

@@ -38,6 +38,16 @@ class Prog::Test::Vm < Prog::Test::Base
   end
 
   label def verify_extra_disks
+
+    Clog.emit("strands_at_verify_extra_disks") {
+      {
+        vm: vm.ubid,
+        strand: strand.ubid,
+        strands:
+          Strand.all.map { |x| [x.ubid, x.prog, x.label, x.subject&.ubid, x.stack] }
+      }
+    }
+
     vm.vm_storage_volumes[1..].each_with_index { |volume, disk_index|
       mount_path = "/home/ubi/mnt#{disk_index}"
       sshable.cmd("mkdir -p #{mount_path}")
@@ -46,6 +56,13 @@ class Prog::Test::Vm < Prog::Test::Base
       sshable.cmd("sudo chown ubi #{mount_path}")
       sshable.cmd("dd if=/dev/urandom of=#{mount_path}/1.txt bs=512 count=10000")
       sshable.cmd("sync #{mount_path}/1.txt")
+    }
+
+    Clog.emit("verify_extra_disks_finished") {
+      {
+        vm: vm.ubid,
+        strand: strand.ubid
+      }
     }
 
     hop_ping_google
