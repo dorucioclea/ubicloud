@@ -48,7 +48,7 @@ class Prog::Test::Vm < Prog::Test::Base
       }
     }
 
-    vm.vm_storage_volumes[1..].each_with_index { |volume, disk_index|
+    vm.vm_storage_volumes[1..].each_with_index do |volume, disk_index|
       mount_path = "/home/ubi/mnt#{disk_index}"
       sshable.cmd("mkdir -p #{mount_path}")
       sshable.cmd("sudo mkfs.ext4 #{volume.device_path.shellescape}")
@@ -56,7 +56,28 @@ class Prog::Test::Vm < Prog::Test::Base
       sshable.cmd("sudo chown ubi #{mount_path}")
       sshable.cmd("dd if=/dev/urandom of=#{mount_path}/1.txt bs=512 count=10000")
       sshable.cmd("sync #{mount_path}/1.txt")
-    }
+    rescue
+      Clog.emit("verify_extra_disks_failed_no_reload") {
+        {
+          vm: vm.ubid,
+          strand: strand.ubid,
+          strands:
+            Strand.all.map { |x| [x.ubid, x.prog, x.label, x.subject&.ubid, x.stack] }
+        }
+      }
+      Clog.emit("verify_extra_disks_failed_with_reload") {
+        {
+          vm: vm.ubid,
+          strand: strand.ubid,
+          strands:
+            Strand.all.map { |x|
+              x.reload
+              [x.ubid, x.prog, x.label, x.subject&.ubid, x.stack]
+            }
+        }
+      }
+      raise
+    end
 
     Clog.emit("verify_extra_disks_finished") {
       {
