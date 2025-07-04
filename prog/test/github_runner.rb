@@ -130,8 +130,26 @@ class Prog::Test::GithubRunner < Prog::Test::Base
       nap 15
     end
 
+    puts "======= FIREWALLS"
+    puts "======= github_service_project_id"
+    if (p = Project[frame["github_service_project_id"]])
+      puts "project #{p.id} - #{p.name}"
+      puts p.firewalls.map { [it.name, it.description, it.firewall_rules.count] }
+    end
     Project[frame["github_service_project_id"]]&.destroy
+
+    puts "======= vm_pool_service_project"
+    if (p = Project[frame["vm_pool_service_project"]])
+      puts "project #{p.id} - #{p.name}"
+      puts p.firewalls.map { [it.name, it.description, it.firewall_rules.count] }
+    end
     Project[frame["vm_pool_service_project"]]&.destroy
+
+    puts "======= github_test_project_id"
+    if (p = Project[frame["github_test_project_id"]])
+      puts "project #{p.id} - #{p.name}"
+      puts p.firewalls.map { [it.name, it.description, it.firewall_rules.count] }
+    end
     Project[frame["github_test_project_id"]]&.destroy
 
     frame["fail_message"] ? fail_test(frame["fail_message"]) : hop_finish
