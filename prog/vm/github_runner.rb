@@ -1,9 +1,14 @@
 # frozen_string_literal: true
 
+require "forwardable"
 require "net/ssh"
 
 class Prog::Vm::GithubRunner < Prog::Base
   subject_is :github_runner
+
+  extend Forwardable
+  def_delegators :github_runner, :installation, :vm, :label_data
+  def_delegators :installation, :project
 
   def self.assemble(installation, repository_name:, label:, default_branch: nil)
     unless Github.runner_labels[label]
@@ -24,9 +29,6 @@ class Prog::Vm::GithubRunner < Prog::Base
   end
 
   def pick_vm
-    label_data = github_runner.label_data
-    installation = github_runner.installation
-
     vm_size = if installation.premium_runner_enabled? || installation.free_runner_upgrade?
       "premium-#{label_data["vcpus"]}"
     else
@@ -49,7 +51,7 @@ class Prog::Vm::GithubRunner < Prog::Base
     boot_image = label_data["boot_image"]
     location_id = Location::GITHUB_RUNNERS_ID
     size = label_data["vm_size"]
-    if label_data["arch"] == "x64" && label_data["boot_image"] == "github-ubuntu-2204" && github_runner.installation.project.get_ff_aws_alien_runners
+    if label_data["arch"] == "x64" && label_data["boot_image"] == "github-ubuntu-2204" && project.get_ff_aws_alien_runners
       boot_image = Config.send(:"#{label_data["boot_image"].tr("-", "_")}_aws_ami_version")
       location_id = Config.github_runner_aws_location_id
       size = Option.aws_instance_type_name("m7a", label_data["vcpus"])
@@ -83,21 +85,19 @@ class Prog::Vm::GithubRunner < Prog::Base
     # If the runner is destroyed before it's ready or doesn't pick a job, don't charge for it.
     return unless github_runner.ready_at && github_runner.workflow_job
 
-    label_data = github_runner.label_data
     billed_vm_size = if label_data["arch"] == "arm64"
       "#{label_data["vm_size"]}-arm"
-    elsif github_runner.installation.free_runner_upgrade?(github_runner.created_at)
+    elsif installation.free_runner_upgrade?(github_runner.created_at)
       # If we enable free upgrades for the project, we should charge
       # the customer for the label's VM size instead of the effective VM size.
       label_data["vm_size"]
-    elsif github_runner.vm.location.aws?
+    elsif vm.location.aws?
       "standard-#{vm.vcpus}"
     else
       "#{vm.family}-#{vm.vcpus}"
     end
     github_runner.update(billed_vm_size:)
     rate_id = BillingRate.from_resource_properties("GitHubRunnerMinutes", billed_vm_size, "global")["id"]
-    project = github_runner.installation.project
 
     retries = 0
     begin
@@ -134,12 +134,8 @@ class Prog::Vm::GithubRunner < Prog::Base
     end
   end
 
-  def vm
-    @vm ||= github_runner.vm
-  end
-
   def github_client
-    @github_client ||= Github.installation_client(github_runner.installation.installation_id)
+    @github_client ||= Github.installation_client(installation.installation_id)
   end
 
   def busy?
@@ -158,7 +154,7 @@ class Prog::Vm::GithubRunner < Prog::Base
   end
 
   label def start
-    pop "Could not provision a runner for inactive project" unless github_runner.installation.project.active?
+    pop "Could not provision a runner for inactive project" unless project.active?
     hop_wait_concurrency_limit unless quota_available?
     hop_allocate_vm
   end
@@ -171,21 +167,21 @@ class Prog::Vm::GithubRunner < Prog::Base
     # requests. There are some remedies, but it would require some refactoring
     # that I'm not keen to do at the moment. Although it looks weird, passing 0
     # as requested_additional_usage keeps the existing behavior.
-    github_runner.installation.project.quota_available?("GithubRunnerVCpu", 0)
+    project.quota_available?("GithubRunnerVCpu", 0)
   end
 
   label def wait_concurrency_limit
     unless quota_available?
       # check utilization, if it's high, wait for it to go down
-      family_utilization = VmHost.where(allocation_state: "accepting", arch: github_runner.label_data["arch"])
+      family_utilization = VmHost.where(allocation_state: "accepting", arch: label_data["arch"])
         .select_group(:family)
         .select_append { round(sum(:used_cores) * 100.0 / sum(:total_cores), 2).cast(:float).as(:utilization) }
         .to_hash(:family, :utilization)
 
-      not_allow = if github_runner.label_data["arch"] == "x64" && github_runner.label_data["family"] == "standard" && github_runner.installation.premium_runner_enabled?
+      not_allow = if label_data["arch"] == "x64" && label_data["family"] == "standard" && installation.premium_runner_enabled?
         family_utilization["premium"] > 75 && family_utilization["standard"] > 75
       else
-        family_utilization.fetch(github_runner.label_data["family"], 0) > 75
+        family_utilization.fetch(label_data["family"], 0) > 75
       end
 
       if not_allow
@@ -193,7 +189,7 @@ class Prog::Vm::GithubRunner < Prog::Base
         nap rand(5..15)
       end
 
-      if github_runner.label_data["arch"] == "x64" && ((family_utilization["premium"] > 75) || (github_runner.installation.free_runner_upgrade? && family_utilization["premium"] > 50))
+      if label_data["arch"] == "x64" && ((family_utilization["premium"] > 75) || (installation.free_runner_upgrade? && family_utilization["premium"] > 50))
         github_runner.incr_not_upgrade_premium
       end
       Clog.emit("allowed because of low utilization") { {exceeded_concurrency_limit: {family_utilization:, label: github_runner.label, repository_name: github_runner.repository_name}} }
@@ -233,8 +229,8 @@ class Prog::Vm::GithubRunner < Prog::Base
         "VM Pool" => vm.pool_id ? UBID.from_uuidish(vm.pool_id).to_s : nil,
         "Location" => vm.vm_host&.location&.name,
         "Datacenter" => vm.vm_host&.data_center,
-        "Project" => github_runner.installation.project.ubid,
-        "Console URL" => "#{Config.base_url}#{github_runner.installation.project.path}/github"
+        "Project" => project.ubid,
+        "Console URL" => "#{Config.base_url}#{project.path}/github"
       }.map { "#{_1}: #{_2}" }.join("\n")
     }
   end
@@ -260,7 +256,7 @@ class Prog::Vm::GithubRunner < Prog::Base
       UBICLOUD_CACHE_URL=#{Config.base_url}/runtime/github/" | sudo tee -a /etc/environment > /dev/null
     COMMAND
 
-    if github_runner.installation.cache_enabled
+    if installation.cache_enabled
       command += <<~COMMAND
         echo "CUSTOM_ACTIONS_CACHE_URL=http://#{vm.private_ipv4}:51123/random_token/" | sudo tee -a /etc/environment > /dev/null
       COMMAND
