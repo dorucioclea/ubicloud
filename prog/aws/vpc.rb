@@ -56,7 +56,7 @@ class Prog::Aws::Vpc < Prog::Base
         rescue Aws::EC2::Errors::InvalidPermissionDuplicate
         end
       end
-      hop_create_subnet
+      hop_create_route_table
     end
     nap 1
   end
@@ -133,28 +133,39 @@ class Prog::Aws::Vpc < Prog::Base
     rescue Aws::EC2::Errors::RouteAlreadyExists
     end
 
-    route_table_details = client.describe_route_tables({route_table_ids: [route_table_id]}).route_tables.first
-    if route_table_details.associations.empty?
-      client.associate_route_table({
-        route_table_id:,
-        subnet_id: private_subnet.private_subnet_aws_resource.subnet_id
-      })
-    end
+    # route_table_details = client.describe_route_tables({route_table_ids: [route_table_id]}).route_tables.first
+    # if route_table_details.associations.empty?
+    #   client.associate_route_table({
+    #     route_table_id:,
+    #     subnet_id: private_subnet.private_subnet_aws_resource.subnet_id
+    #   })
+    # end
 
     pop "subnet created"
   end
 
   label def destroy
-    subnet = client.describe_subnets({filters: [{name: "subnet-id", values: [private_subnet.private_subnet_aws_resource.subnet_id]}]}).subnets.first
-    hop_delete_security_group unless subnet
+    subnets = client.describe_subnets({filters: [{name: "vpc-id", values: [private_subnet.private_subnet_aws_resource.vpc_id]}]}).subnets
+    hop_delete_security_group if subnets.empty?
 
-    nap 5 if subnet.state != "available"
     begin
-      client.delete_subnet({subnet_id: private_subnet.private_subnet_aws_resource.subnet_id})
+      subnets.each do |subnet|
+        nap 5 if subnet.state != "available"
+        client.delete_subnet({subnet_id: subnet.subnet_id})
+      end
     rescue Aws::EC2::Errors::DependencyViolation
       nap 5
     end
     hop_delete_security_group
+    # subnet = client.describe_subnets({filters: [{name: "subnet-id", values: [private_subnet.private_subnet_aws_resource.subnet_id]}]}).subnets.first
+
+    # nap 5 if subnet.state != "available"
+    # begin
+    #   client.delete_subnet({subnet_id: private_subnet.private_subnet_aws_resource.subnet_id})
+    # rescue Aws::EC2::Errors::DependencyViolation
+    #   nap 5
+    # end
+    # hop_delete_security_group
   end
 
   label def delete_security_group
